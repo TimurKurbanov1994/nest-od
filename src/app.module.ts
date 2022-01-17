@@ -1,12 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { UserModule } from './user/user.module';
-import { DatabaseModule } from './database/database.module';
-import { TagModule } from './tag/tag.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { UserModule } from './user/user.module';
+import { TagModule } from './tag/tag.module';
+import { AuthModule } from './auth/auth.module';
 import { UserEntity } from './user/user.entity';
 import { TagEntity } from './tag/tag.entity';
-import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -16,14 +15,17 @@ import { AuthModule } from './auth/auth.module';
     }),
     TypeOrmModule.forRoot({
       type: 'postgres',
-      port: Number(process.env.DB_PORT) || 5432,
-      username: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_DATABASE,
-      host: process.env.DB_HOST,
+      host: 'localhost',
+      port: 5432,
+      username: 'postgres',
+      password: '1',
+      database: 'test_oq',
+      migrations: [__dirname + '/src/migrations/*{.ts,.js}'],
       entities: [UserEntity, TagEntity],
+      cli: {
+        migrationsDir: '/src/migrations',
+      },
       synchronize: true,
-      dropSchema: false,
     }),
     UserModule,
     TagModule,

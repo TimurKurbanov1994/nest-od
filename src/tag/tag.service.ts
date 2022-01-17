@@ -1,19 +1,19 @@
-import { Injectable } from '@nestjs/common';
-import { DatabaseService } from '../database/database.service';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { UserEntity } from '../user/user.entity';
 import { Repository } from 'typeorm';
+
 import { TagEntity } from './tag.entity';
+import { ResponseTagDto } from './dto/response.tag.dto';
+import { ResponseTagsDto } from './dto/response.tags.dto';
 
 @Injectable()
 export class TagService {
-  // constructor(private readonly databaseService: DatabaseService) {}
   constructor(
     @InjectRepository(TagEntity)
     private tagsRepository: Repository<TagEntity>,
   ) {}
 
-  async createTag(dto: any) {
+  async createTag(dto: any): Promise<ResponseTagDto> {
     const { name, sortOrder, creator } = dto;
     const newUser = this.tagsRepository.create({
       name,
@@ -24,70 +24,111 @@ export class TagService {
     return await this.tagsRepository.save(newUser);
   }
 
-  async getTag(id: number): Promise<any> {
-    return await this.tagsRepository.find({
-      where: { id },
-      relations: ['creator'],
-      select: ['name', 'sortOrder'],
-    });
+  async getTag(id: number): Promise<ResponseTagDto> {
+    const tag = await this.tagsRepository
+      .createQueryBuilder('tag')
+      .select(['tag.name', 'tag.sortOrder'])
+      .where('tag.id = :id', { id })
+      .leftJoin('tag.creator', 'creator')
+      .addSelect(['creator.uid', 'creator.nickname'])
+      .getOne();
+    if (!tag) {
+      throw new NotFoundException(`тег с id: ${id} не найден`);
+    }
+    return tag;
   }
 
-  async getTagsSort(query): Promise<any> {
+  async getTagsSort(query): Promise<ResponseTagsDto> {
     const { offset, length } = query;
-    const paramSortByOrder = query.hasOwnProperty('sortByOrder')
-      ? 'DESC'
-      : null;
-    const paramSortByName = query.hasOwnProperty('sortByName') ? 'DESC' : null;
-    return await this.tagsRepository.find({
-      order: {
-        sortOrder: paramSortByOrder,
-        name: paramSortByName,
+    const quantity = await this.tagsRepository.count();
+    const sortTags = this.tagsRepository
+      .createQueryBuilder('tag')
+      .select(['tag.name', 'tag.sortOrder'])
+      .leftJoin('tag.creator', 'creator')
+      .addSelect(['creator.uid', 'creator.nickname'])
+      .offset(offset)
+      .limit(length);
+    function hasOrder(arg) {
+      if (query.hasOwnProperty(arg)) {
+        sortTags.addOrderBy('tag.sortOrder', 'DESC');
+      }
+    }
+    hasOrder(query);
+
+    if (query.hasOwnProperty('sortByOrder')) {
+      sortTags.addOrderBy('tag.sortOrder', 'DESC');
+    }
+    if (query.hasOwnProperty('sortByName')) {
+      sortTags.addOrderBy('name', 'DESC');
+    }
+    const result = await sortTags.getMany();
+
+    return {
+      data: result,
+      meta: {
+        offset: +offset,
+        length: +length,
+        quantity,
       },
-      skip: offset,
-      take: length,
+    };
+  }
+
+  async updateTag(idTag: number, dto: any, uidUser: string): Promise<any> {
+    const isMatchTag = await this.isOwnerOfTag(idTag, uidUser);
+    const tag = await this.tagsRepository.findOne(idTag);
+    if (isMatchTag) {
+      await this.tagsRepository.update(idTag, dto);
+      await this.tagsRepository.save({ ...tag, ...dto });
+      return await this.getTag(idTag);
+    }
+    return {};
+  }
+
+  async deleteTag(idTag: number, uidUser: string): Promise<void> {
+    const isMatchTag = await this.isOwnerOfTag(idTag, uidUser);
+    console.log(isMatchTag);
+    if (isMatchTag) {
+      const result = await this.tagsRepository.delete({ id: idTag });
+      if (result.affected === 0) {
+        throw new NotFoundException(`тег с id: ${idTag} не найден`);
+      }
+    } else {
+      throw new NotFoundException(`тег с id: ${idTag} невозможно удалить`);
+    }
+  }
+
+  public async isOwnerOfTag(idTag, uidUser) {
+    const isMatch = await this.tagsRepository.find({
+      where: {
+        id: idTag,
+        creator: {
+          uid: uidUser,
+        },
+      },
+      relations: ['creator'],
     });
+    return !!isMatch.length;
   }
 
-  async updateTag(id: number, dto: any): Promise<any> {
-    const tag = await this.tagsRepository.findOne(id);
-    await this.tagsRepository.update(id, dto);
-    return await this.tagsRepository.save({ ...tag, ...dto });
+  public async getIdTag(): Promise<any> {
+    const tagIds = await this.tagsRepository.find({
+      select: ['id'],
+    });
+    return tagIds.map((item) => item.id);
   }
 
-  async deleteTag(id: number) {
-    return await this.tagsRepository.delete({ id });
+  async updateCreatorOfTag(ids: number[], uid) {
+    const payload = { creator: uid };
+    return await this.tagsRepository
+      .createQueryBuilder('tag')
+      .useTransaction(true)
+      .update<TagEntity>(TagEntity, { ...payload })
+      .where('tag.id IN (:...ids)', { ids })
+      .returning(['id', 'name', 'sortOrder'])
+      .execute();
   }
 
-  // async createTag(dto: any) {
-  //   const { name, sortOrder = 0, creator } = dto;
-  //   // const creator = 'b0413c39-0230-434d-8206-7c05e0aedc87';
-  //   return await this.databaseService.query(
-  //     'INSERT INTO tag (name, sortOrder, creator) VALUES ($1, $2, $3) RETURNING *',
-  //     [name, sortOrder, creator],
-  //   );
-  // }
-  //
-  // async getTag(id: string): Promise<any> {
-  //   console.log(id);
-  //   return await this.databaseService.query(
-  //     `SELECT email, nickname FROM tag LEFT JOIN users ON tag.creator = users.uid WHERE id = '${id}'`,
-  //   );
-  // }
-  //
-  // async updateTag(dto: any, uid: string): Promise<any> {
-  //   const { email, password, nickname } = dto;
-  //
-  //   return await this.databaseService.query(
-  //     `UPDATE Tags SET (email, password,  nickname) WHERE Tags.uid = '${uid}' VALUES ($1, $2, $3) RETURNING *`,
-  //     [email, nickname],
-  //   );
-  // }
-  //
-  // async deleteTag(uid: string) {
-  //   return await this.databaseService
-  //     .query(`DELETE FROM Tags WHERE uid = '${uid}'`)
-  //     .then(() => {
-  //       data: 'Tag deleted';
-  //     });
-  // }
+  async getTags(ids) {
+    return await this.tagsRepository.find({ where: [ids] });
+  }
 }

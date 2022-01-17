@@ -1,16 +1,25 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { AuthSignUpDto } from './dto/sign.user.dto';
+import {
+  HttpException,
+  HttpStatus,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { AuthSignUpDto } from '../auth/dto/sign.user.dto';
 
 import { InjectRepository } from '@nestjs/typeorm';
 import { UserEntity } from './user.entity';
 import { Repository } from 'typeorm';
+import { TagService } from '../tag/tag.service';
+import { UpdateUserDto } from './dto/update.user.dto';
+import { ResponseUserDto } from './dto/response.user.dto';
+import { ResponseCascadeTagsDto } from '../tag/dto/response.cascadeTags.dto';
 
 @Injectable()
 export class UserService {
-  // constructor(private readonly databaseService: DatabaseService) {}
   constructor(
     @InjectRepository(UserEntity)
     private usersRepository: Repository<UserEntity>,
+    private tagService: TagService,
   ) {}
 
   async createUser(dto: AuthSignUpDto) {
@@ -31,14 +40,25 @@ export class UserService {
     });
   }
 
-  async updateUser(dto: any, uid: string): Promise<any> {
+  async updateUser(dto: UpdateUserDto, uid: string): Promise<ResponseUserDto> {
     const user = await this.usersRepository.findOne(uid);
     await this.usersRepository.update(uid, dto);
-    return await this.usersRepository.save({ ...user, ...dto });
+    const saveUser = await this.usersRepository.save({ ...user, ...dto });
+    return new ResponseUserDto(saveUser);
   }
 
-  async deleteUser(uid: string) {
-    return await this.usersRepository.delete({ uid });
+  async deleteUser(req) {
+    const uid = req.user.uid;
+    req.headers.authorization = '';
+    const result = await this.usersRepository.delete({ uid });
+    if (result.affected === 0) {
+      throw new NotFoundException(`Пользователь с uid: ${uid} не найден`);
+    }
+  }
+
+  async deleteTagofUser(uid, id): Promise<ResponseCascadeTagsDto> {
+    await this.tagService.deleteTag(+id, uid);
+    return await this.getUser(uid);
   }
 
   async getUserByEmail(email: string) {
@@ -47,32 +67,15 @@ export class UserService {
     });
   }
 
-  // return await this.databaseService.query(
-  //   'INSERT INTO users (uid, email, password,  nickname) VALUES ($1, $2, $3, $4) RETURNING *',
-  //   [uid, email, hasPass, nickname],
-  // );
-
-  // async getUser(uid: string): Promise<any> {
-  //   return await this.databaseService.query(
-  //     `SELECT * FROM users WHERE uid = '${uid}'`,
-  //   );
-  // }
-  //
-  // async updateUser(dto: any, uid: string): Promise<any> {
-  //   const { email, password, nickname } = dto;
-  //   const hasPass = await bcrypt.hash(password, 10);
-  //
-  //   return await this.databaseService.query(
-  //     `UPDATE users SET (email, password,  nickname) WHERE users.uid = '${uid}' VALUES ($1, $2, $3) RETURNING *`,
-  //     [email, hasPass, nickname],
-  //   );
-  // }
-  //
-  // async deleteUser(uid: string) {
-  //   return await this.databaseService
-  //     .query(`DELETE FROM users WHERE uid = '${uid}'`)
-  //     .then(() => {
-  //       data: 'User deleted';
-  //     });
-  // }
+  public async postCascadTag(uid, dtoTags): Promise<ResponseCascadeTagsDto> {
+    const tagIds = await this.tagService.getIdTag();
+    const isMatch = dtoTags.tags.every((x) => tagIds.includes(x));
+    if (!isMatch) {
+      throw new HttpException('Не существует тегов', HttpStatus.BAD_REQUEST);
+    }
+    const result = await this.tagService.updateCreatorOfTag(dtoTags.tags, {
+      uid,
+    });
+    return { tags: result.raw };
+  }
 }

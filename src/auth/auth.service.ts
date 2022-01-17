@@ -6,7 +6,11 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+
 import { UserService } from '../user/user.service';
+import { AuthSignUpDto } from './dto/sign.user.dto';
+import { LoginUserDto } from './dto/login.user.dto';
+import { ResponseTokenDto } from './dto/response.token.dto';
 
 @Injectable()
 export class AuthService {
@@ -15,12 +19,12 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
-  async login(userDto: any) {
+  async login(userDto: LoginUserDto): Promise<ResponseTokenDto> {
     const user = await this.validateUser(userDto);
     return this.generateToken(user);
   }
 
-  async registration(userDto: any) {
+  async registration(userDto: AuthSignUpDto): Promise<ResponseTokenDto> {
     const candidate = await this.userService.getUserByEmail(userDto.email);
     if (candidate) {
       throw new HttpException(
@@ -32,7 +36,7 @@ export class AuthService {
     return this.generateToken(user);
   }
 
-  private async generateToken(user: any) {
+  private async generateToken(user: any): Promise<ResponseTokenDto> {
     const payload = {
       email: user.email,
       uid: user.uid,
@@ -44,8 +48,14 @@ export class AuthService {
     };
   }
 
-  private async validateUser(userDto: any) {
+  private async validateUser(userDto: LoginUserDto): Promise<LoginUserDto> {
     const user = await this.userService.getUserByEmail(userDto.email);
+    if (!user) {
+      throw new HttpException(
+        'Пользователь с таким email не существует',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const passwordEquals = await bcrypt.compare(
       userDto.password,
       user.password,
@@ -58,8 +68,18 @@ export class AuthService {
     });
   }
 
-  async logout(userDto: any) {
-    const user = await this.validateUser(userDto);
-    return this.jwtService.decode();
+  async logout(req) {
+    req.headers.authorization = '';
+  }
+
+  async refreshToken(req) {
+    if (!req.headers.authorization) {
+      throw new UnauthorizedException({
+        message: 'Нет токена',
+      });
+    }
+    const token = req.headers.authorization.split(' ')[1];
+    const user = this.jwtService.verify(token);
+    return this.generateToken(user);
   }
 }
