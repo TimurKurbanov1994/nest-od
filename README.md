@@ -1,7 +1,7 @@
 ## Стек:
 DB: PostgresSQL
-
 Framework: NestJS 
+ORM: TypeORM
 
 ## Описание
 
